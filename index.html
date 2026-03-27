@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>North Star Grand Lodge — Trail Atlas</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Poppins:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --black:#231f20;--cream:#f7f6f5;--grey:#414041;--gold:#ead8ac;
+  --mono:'DM Mono',monospace;--sans:'Poppins',sans-serif;
+  --bar-h:108px;
+}
+html,body{height:100%;overflow:hidden;background:#1a1714;font-family:var(--sans)}
+
+/* Map fills everything below the bar */
+#map{position:absolute;top:var(--bar-h);left:0;right:0;bottom:0;width:100%}
+
+/* ── TOP BAR — stacked on mobile, single row on wide ── */
+#topbar{
+  position:absolute;top:0;left:0;right:0;z-index:1000;
+  height:var(--bar-h);
+  background:rgba(35,31,32,.97);
+  border-bottom:1px solid rgba(234,216,172,.22);
+  display:flex;flex-direction:column;
+  box-shadow:0 2px 16px rgba(0,0,0,.5);
+  overflow:visible;
+}
+
+/* Row 1: monogram + title */
+#badge{
+  display:flex;align-items:center;gap:12px;
+  padding:10px 16px 8px;
+  flex-shrink:0;
+  border-bottom:1px solid rgba(234,216,172,.1);
+}
+#badge-mono{width:38px;height:38px;flex-shrink:0}
+#badge-text{line-height:1}
+#badge-project{
+  font-family:var(--mono);font-size:7px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--gold);display:block;margin-bottom:3px;
+}
+#badge-title{
+  font-family:var(--sans);font-size:13px;font-weight:300;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--cream);display:block;
+}
+
+/* Row 2: filter icons */
+#filters{
+  display:flex;align-items:center;gap:6px;
+  padding:8px 16px;
+  overflow-x:auto;overflow-y:visible;
+  -webkit-overflow-scrolling:touch;
+  scrollbar-width:none;
+  flex-shrink:0;
+}
+#filters::-webkit-scrollbar{display:none}
+
+/* Wide screens: single row side by side */
+@media(min-width:680px){
+  :root{--bar-h:62px}
+  #topbar{flex-direction:row;align-items:center}
+  #badge{
+    border-bottom:none;border-right:1px solid rgba(234,216,172,.14);
+    padding:0 18px;height:100%;
+  }
+  #badge-mono{width:42px;height:42px}
+  #filters{padding:0 12px}
+}
+.fp{
+  display:flex;align-items:center;justify-content:center;
+  width:38px;height:38px;padding:0;
+  border-radius:4px;flex-shrink:0;
+  border:1px solid rgba(234,216,172,.25);
+  background:rgba(255,255,255,.03);
+  color:rgba(234,216,172,.45);
+  cursor:pointer;transition:all .15s;
+  -webkit-tap-highlight-color:transparent;
+}
+.fp svg{width:18px;height:18px;display:block}
+.fp:hover{border-color:rgba(234,216,172,.55);color:var(--gold)}
+.fp.on{background:var(--gold);color:var(--black);border-color:var(--gold)}
+
+/* Styled tooltip injected by JS into body — never clipped */
+#fp-tip{
+  position:fixed;
+  background:rgba(35,31,32,.97);
+  color:var(--gold);
+  font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;
+  padding:5px 10px;border-radius:3px;
+  border:1px solid rgba(234,216,172,.3);
+  white-space:nowrap;pointer-events:none;
+  opacity:0;transition:opacity .15s;
+  z-index:9999;
+}
+
+/* ── LOAD PROGRESS ── */
+#load-strip{
+  position:absolute;bottom:0;left:0;right:0;z-index:1000;
+  background:rgba(35,31,32,.9);
+  border-top:1px solid rgba(234,216,172,.12);
+  padding:7px 16px;
+  display:flex;align-items:center;gap:12px;
+  transition:opacity .5s;
+}
+#load-strip.done{opacity:0;pointer-events:none}
+#load-bar-bg{flex:1;height:2px;background:rgba(234,216,172,.12);border-radius:1px}
+#load-bar{height:100%;width:0%;background:var(--gold);border-radius:1px;transition:width .3s ease}
+#load-msg{font-family:var(--mono);font-size:7.5px;letter-spacing:.06em;color:rgba(234,216,172,.45);white-space:nowrap}
+
+/* ── INFO PANEL — bottom sheet, full width ── */
+#info{
+  position:absolute;
+  bottom:0;left:0;right:0;
+  z-index:1001;
+  background:rgba(35,31,32,.98);
+  border-top:1px solid rgba(234,216,172,.22);
+  border-radius:10px 10px 0 0;
+  padding:12px 20px 28px;
+  box-shadow:0 -4px 32px rgba(0,0,0,.6);
+  transform:translateY(100%);opacity:0;pointer-events:none;
+  transition:all .22s ease;
+  max-height:48vh;overflow-y:auto;
+}
+#info.vis{transform:translateY(0);opacity:1;pointer-events:all}
+#info::before{
+  content:'';display:block;width:32px;height:3px;border-radius:2px;
+  background:rgba(234,216,172,.2);margin:0 auto 12px;
+}
+#info-type{font-family:var(--mono);font-size:7.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--gold);margin-bottom:3px}
+#info-name{font-family:var(--sans);font-size:17px;font-weight:300;font-style:italic;color:var(--cream);margin-bottom:6px;line-height:1.2}
+#info-rule{height:1px;background:rgba(234,216,172,.18);margin-bottom:10px}
+#info-mile{font-family:var(--mono);font-size:7.5px;color:var(--gold);background:rgba(234,216,172,.07);border:1px solid rgba(234,216,172,.18);padding:2px 7px;border-radius:2px;display:inline-block;margin-bottom:8px}
+#info-short{font-size:11px;font-weight:400;color:rgba(247,246,245,.75);margin-bottom:6px;line-height:1.6}
+#info-full{font-size:10px;font-weight:300;color:rgba(247,246,245,.42);line-height:1.7}
+#info-close{
+  position:absolute;top:12px;right:14px;
+  background:rgba(234,216,172,.07);border:1px solid rgba(234,216,172,.16);
+  color:rgba(234,216,172,.5);width:26px;height:26px;border-radius:3px;
+  cursor:pointer;font-size:15px;line-height:26px;text-align:center;
+}
+#info-close:hover{color:var(--cream)}
+
+/* ── POI LABELS ── */
+.poi-label{
+  background:transparent;border:none;box-shadow:none;padding:0;
+  font-family:var(--mono);font-size:9px;font-weight:500;
+  letter-spacing:.05em;text-transform:uppercase;
+  white-space:nowrap;pointer-events:none;
+  text-shadow:0 1px 3px rgba(0,0,0,.9),0 0 8px rgba(0,0,0,.7);
+}
+.poi-label.hub {color:#7ab8d4}
+.poi-label.mile{color:var(--gold)}
+.poi-label.feat{color:#8abf6a}
+.poi-label.cons{color:#a8c882}
+
+/* ── LEAFLET OVERRIDES ── */
+.leaflet-container{background:#1a1714}
+.leaflet-control-zoom{border:1px solid rgba(234,216,172,.22) !important;border-radius:3px !important}
+.leaflet-control-zoom a{
+  background:rgba(35,31,32,.96) !important;color:var(--gold) !important;
+  border-bottom:1px solid rgba(234,216,172,.14) !important;
+  width:34px !important;height:34px !important;line-height:34px !important;
+  font-size:16px !important;
+}
+.leaflet-control-zoom a:hover{background:rgba(50,45,46,.98) !important;color:var(--cream) !important}
+.leaflet-popup-content-wrapper{background:rgba(35,31,32,.97);border:1px solid rgba(234,216,172,.22);border-radius:3px;box-shadow:0 4px 20px rgba(0,0,0,.5)}
+.leaflet-popup-content{font-family:var(--sans);font-size:11px;font-weight:300;line-height:1.5;margin:10px 14px;color:var(--cream)}
+.leaflet-popup-content b{font-family:var(--sans);font-weight:400;font-style:italic;font-size:13px;display:block;margin-bottom:3px;color:var(--cream)}
+.leaflet-popup-content .pm{font-family:var(--mono);font-size:8px;color:rgba(234,216,172,.45)}
+.leaflet-popup-tip-container{display:none}
+.leaflet-control-attribution{background:rgba(35,31,32,.8) !important;color:rgba(234,216,172,.3) !important;font-size:7px !important;font-family:var(--mono)}
+.leaflet-control-attribution a{color:rgba(234,216,172,.3) !important}
+
+/* Wider screens handled above in topbar media query */
+</style>
+</head>
+<body>
+
+<!-- Top bar: monogram left, filters scroll right -->
+<div id="topbar">
+  <div id="badge">
+    <svg id="badge-mono" viewBox="0 0 1080 1080" xmlns="http://www.w3.org/2000/svg">
+      <path fill="#ead8ac" d="M397.84,625.58c-9.36,23.38-60.8,165.54-65.48,185.18-.93,6.56-2.8,15.91-2.8,20.59,0,13.09,11.23,20.57,31.8,20.57h43.96c6.55,0,9.35,1.86,9.35,6.55v21.51c0,6.55-2.8,8.41-7.48,8.41-13.09,0-51.43-2.8-106.62-2.8-68.27,0-88.84,2.8-101.94,2.8-4.67,0-6.55-1.86-6.55-7.47v-22.45c0-4.68,3.74-6.55,7.48-6.55h32.74c28.06,0,41.15-13.09,54.24-43.03,6.56-14.97,74.82-187.99,101.94-264.68,6.56-18.7,82.31-219.79,90.73-245.04,2.8-9.35,7.48-21.51.93-31.8-2.8-3.74-6.55-8.42-6.55-12.16,0-2.8,1.88-6.55,8.42-8.42,26.18-5.61,67.34-33.67,77.63-46.77,4.68-4.67,7.48-8.42,12.15-8.42,5.62,0,7.48,5.61,10.29,15.9,17.77,58.93,90.73,268.43,108.5,328.28,21.51,72.95,82.3,246.91,95.4,274.04,15.89,30.86,40.21,42.09,63.6,42.09h30.86c5.61,0,7.48,2.8,7.48,6.55v23.38c0,4.68-2.82,6.55-9.36,6.55-16.83,0-36.47-2.8-112.23-2.8s-110.35,2.8-131.87,2.8c-4.68,0-7.48-2.8-7.48-8.41v-21.51c0-5.61,2.8-6.55,8.41-6.55h23.39c26.18,0,34.6-9.36,28.06-35.54-7.48-33.68-45.83-153.39-58.93-190.8l-11.21-33.67c-8.42-28.06-84.17-261.87-88.85-275.9-2.8-6.55-4.68-13.1-7.48-13.1-3.74,0-7.48,6.55-10.29,14.03-4.68,12.16-93.52,251.59-100.08,274.97l-12.15,33.67Z"/>
+      <polygon fill="#ead8ac" points="850.52 250.72 885.46 250.72 857.19 271.26 867.99 304.49 839.72 283.95 811.45 304.49 822.25 271.26 793.98 250.72 828.92 250.72 839.72 217.49 850.52 250.72"/>
+    </svg>
+    <div id="badge-text">
+      <span id="badge-project">North Star Grand Lodge</span>
+      <span id="badge-title">Trail Atlas</span>
+    </div>
+  </div>
+  <div id="filters">
+    <button class="fp on" data-f="all" data-tip="All trails">
+      <svg viewBox="0 0 20 20"><circle cx="5" cy="5" r="2.2" fill="currentColor"/><circle cx="15" cy="5" r="2.2" fill="currentColor"/><circle cx="5" cy="15" r="2.2" fill="currentColor"/><circle cx="15" cy="15" r="2.2" fill="currentColor"/></svg>
+    </button>
+    <button class="fp" data-f="foot" data-tip="Hiking">
+      <svg viewBox="0 0 20 20"><circle cx="10" cy="3.5" r="2" fill="currentColor"/><path d="M10 6 L8 13 L5 18 M10 6 L12 13 L15 18 M8 10 L12 10" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>
+    </button>
+    <button class="fp" data-f="ski" data-tip="Ski trails">
+      <svg viewBox="0 0 20 20"><circle cx="13" cy="3" r="1.8" fill="currentColor"/><path d="M13 5 L11 9 L7 11 M13 5 L14 9 L17 11" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/><path d="M3 15 Q10 13 17 15" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>
+    </button>
+    <button class="fp" data-f="mtb" data-tip="Mountain bike">
+      <svg viewBox="0 0 20 20"><circle cx="5" cy="13" r="4" stroke="currentColor" stroke-width="1.6" fill="none"/><circle cx="15" cy="13" r="4" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M5 13 L10 6 L15 13 M10 6 L12 4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/><circle cx="10" cy="13" r="1.2" fill="currentColor"/></svg>
+    </button>
+    <button class="fp" data-f="multi" data-tip="Multi-use">
+      <svg viewBox="0 0 20 20"><path d="M4 7 L16 7 M13 4 L16 7 L13 10" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 13 L4 13 M7 10 L4 13 L7 16" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+  </div>
+</div>
+
+<!-- Map -->
+<div id="map"></div>
+
+<!-- Info panel -->
+<div id="info">
+  <div id="info-close">×</div>
+  <div id="info-type"></div>
+  <div id="info-name"></div>
+  <div id="info-rule"></div>
+  <div id="info-mile-wrap"></div>
+  <div id="info-short"></div>
+  <div id="info-full"></div>
+</div>
+
+<!-- Load strip -->
+<div id="load-strip">
+  <span id="load-msg">Connecting to OpenStreetMap…</span>
+  <div id="load-bar-bg"><div id="load-bar"></div></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ── CONFIG ────────────────────────────────────────────────────────────
+const CENTER   = [64.862, -148.072]; // Ryan Lode
+const BBOX     = '64.790,-148.350,64.950,-147.680';
+const OVERPASS = 'https://overpass-api.de/api/interpreter';
+const QUERY    = `[out:json][timeout:55];
+(
+  way["highway"~"path|footway|track|cycleway|bridleway"](${BBOX});
+  way["piste:type"](${BBOX});
+  way["highway"~"primary|secondary|tertiary|unclassified|residential"](${BBOX});
+);
+out body;>;out skel qt;`;
+
+// ── MAP ───────────────────────────────────────────────────────────────
+const map = L.map('map', { zoomControl:false }).setView(CENTER, 13);
+L.control.zoom({ position:'bottomright' }).addTo(map);
+
+L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenTopoMap · © OpenStreetMap contributors',
+  subdomains: 'abc', maxZoom: 17
+}).addTo(map);
+
+// ── STYLE ─────────────────────────────────────────────────────────────
+function styleWay(tags) {
+  const h    = tags.highway || '';
+  const name = (tags.name || '').toLowerCase();
+  const piste = tags['piste:type'] || '';
+  const mtb   = tags['mtb:scale'] || '';
+
+  if (['primary','secondary'].includes(h))
+    return { color:'#8a7e62', weight:2.4, opacity:.65, dash:'', cat:'road' };
+  if (['tertiary','unclassified'].includes(h))
+    return { color:'#a09478', weight:1.8, opacity:.55, dash:'', cat:'road' };
+  if ('residential' === h)
+    return { color:'#b8aa92', weight:1.0, opacity:.4, dash:'', cat:'road' };
+
+  if (piste || name.includes('skarland') || name.includes('nordic') ||
+      name.includes('birch hill') || name.includes('pearl creek') ||
+      (name.includes('ski') && !name.includes('skijor')))
+    return { color:'#4a9ab8', weight:2.8, opacity:.9, dash:'', cat:'ski' };
+
+  if (mtb || name.includes('singletrack') || name.includes('outer loop') ||
+      name.includes('inner loop') || name.includes('helter') ||
+      name.includes('fireplug') || name.includes('after hours') ||
+      name.includes("st. pat") || h === 'cycleway')
+    return { color:'#c87832', weight:2.6, opacity:.9, dash:'', cat:'mtb' };
+
+  if (h === 'track')
+    return { color:'#9a9282', weight:1.8, opacity:.7, dash:'5,5', cat:'track' };
+
+  if (['footway','steps','bridleway'].includes(h))
+    return { color:'#c85030', weight:2.2, opacity:.9, dash:'', cat:'foot' };
+
+  if (h === 'path') {
+    if (name.includes('powerline') || name.includes("o'brien") || name.includes('obrien') ||
+        name.includes('dunbar') || name.includes('tvrr') || name.includes('railroad') ||
+        name.includes('commuter'))
+      return { color:'#6aaa4a', weight:2.8, opacity:.9, dash:'', cat:'multi' };
+    if (name.includes('ski') || name.includes('groomed'))
+      return { color:'#4a9ab8', weight:2.8, opacity:.9, dash:'', cat:'ski' };
+    if (name.includes('mtb') || name.includes('bike'))
+      return { color:'#c87832', weight:2.6, opacity:.9, dash:'', cat:'mtb' };
+    return { color:'#c85030', weight:2.2, opacity:.9, dash:'', cat:'foot' };
+  }
+  return { color:'#9a9282', weight:1.4, opacity:.5, dash:'4,4', cat:'track' };
+}
+
+const CAT = { foot:'Hiking', ski:'Ski', mtb:'MTB', multi:'Multi-use', track:'Track', road:'Road' };
+let allEntries = [];
+
+// ── RENDER TRAILS ─────────────────────────────────────────────────────
+function render(elements) {
+  const nodes = {};
+  elements.forEach(e => { if (e.type === 'node') nodes[e.id] = [e.lat, e.lon]; });
+
+  elements.filter(e => e.type === 'way').forEach(way => {
+    const tags = way.tags || {};
+    const lls  = (way.nodes || []).map(id => nodes[id]).filter(Boolean);
+    if (lls.length < 2) return;
+
+    const s    = styleWay(tags);
+    const name = tags.name || '';
+    if (s.cat === 'road' && !name) return;
+
+    const layer = L.polyline(lls, {
+      color: s.color, weight: s.weight,
+      opacity: s.opacity, dashArray: s.dash || null
+    }).addTo(map);
+
+    if (name) {
+      const pop = `<b>${name}</b><br><span class="pm">${CAT[s.cat]||s.cat}${tags.surface ? ' · ' + tags.surface : ''}</span>`;
+      layer.bindPopup(pop, { maxWidth:220 });
+    }
+
+    allEntries.push({ layer, s });
+  });
+
+  setLoad(100, `${allEntries.filter(e=>e.s.cat!=='road').length} trail segments loaded`);
+  setTimeout(() => document.getElementById('load-strip').classList.add('done'), 1200);
+}
+
+// ── FILTER ────────────────────────────────────────────────────────────
+document.querySelectorAll('.fp').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.fp').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    const f = btn.dataset.f;
+    allEntries.forEach(e => {
+      // Roads always stay visible regardless of filter
+      if (e.s.cat === 'road') return;
+      const show = f === 'all' || e.s.cat === f;
+      show ? (!map.hasLayer(e.layer) && e.layer.addTo(map))
+           : (map.hasLayer(e.layer) && map.removeLayer(e.layer));
+    });
+  });
+});
+
+// ── LOAD PROGRESS ─────────────────────────────────────────────────────
+function setLoad(pct, msg) {
+  document.getElementById('load-bar').style.width = pct + '%';
+  document.getElementById('load-msg').textContent  = msg;
+}
+
+// ── POIs ─────────────────────────────────────────────────────────────
+const POIS = [
+  { id:'ryan-lode',   name:'Ryan Lode Mine',          coords:[64.8655,-148.0720], type:'Feature',
+    short:'Historic gold mine — southwest Ester Dome ridge, trail hub',
+    full:'Ridge between Eva Creek and St. Patrick Creek. First worked 1913; open-pit 1987–1989 yielded 19,220 oz gold. Intersects Healy Intertie Powerline Trail and Goldhill Road singletrack climbs.',
+    mile:null },
+  { id:'goldstream',  name:'Goldstream Sports',        coords:[64.8469,-147.9875], type:'Hub',
+    short:'711 Sheep Creek Rd — Epicenter of Connectivity',
+    full:'Primary departure point. Relay Exchange Zone #1 (Mile 8.1) for the Equinox Marathon. Grooms the Ester Dome singletrack network.',
+    mile:null },
+  { id:'uaf',         name:'UAF Patty Center',         coords:[64.8410,-147.8300], type:'Milestone',
+    short:'Start / Finish — Equinox Marathon',
+    full:'Route originates at Student Recreation Center soccer fields before ascending Yukon Drive. UAF maintains 25.8 miles of trail on North Campus.',
+    mile:'Mile 0.0' },
+  { id:'ester-summit',name:'Ester Dome Summit',        coords:[64.8800,-148.0500], type:'Feature',
+    short:'2,364 ft — 1,500 ft vertical gain from valley floor',
+    full:'Equinox Marathon turnaround at Mile 15.1. Singletrack: Outer Loop (6.3 mi, 980 ft), Inner Loop (2.7 mi, 462 ft). Named trails: Helter Skelter, After Hours, Fireplug, St. Patrick\'s.',
+    mile:'Mile 13.2 – 16.8' },
+  { id:'ester-park',  name:'Ester Community Park',     coords:[64.8485,-148.1050], type:'Milestone',
+    short:'West-side trailhead — Goldhill Rd, West Ridge, Ryan Lode',
+    full:'Off Parks Highway before Ester village. Primary trailhead for west Ester Dome network.',
+    mile:null },
+  { id:'ballaine',    name:'Yankovich & Ballaine Rd',  coords:[64.8650,-147.8350], type:'Milestone',
+    short:'Urban / wilderness interface — feed station at Mile 2.5',
+    full:'Key Equinox intersection. Parking pullout at Ballaine Road Mile 2.5 is primary vehicle access for the Goldstream Public Use Area.',
+    mile:'Mile 2.2' },
+  { id:'peat',        name:'IALT Peat Ponds',          coords:[64.8600,-147.9600], type:'Conservation',
+    short:'25-acre prime bird habitat & skiing hub',
+    full:'Intersection of Sheep Creek Rd and Murphy Dome Rd. Mechanically groomed in winter by Metropolitan Garage.',
+    mile:null },
+  { id:'ivory',       name:"Ivory Jack's",              coords:[64.8720,-147.9750], type:'Milestone',
+    short:'Primary Goldstream Valley trailhead — TVRR access',
+    full:'On Goldstream Road. TVRR / Goldstream Valley loop starts at the railroad tracks nearby.',
+    mile:null },
+  { id:'rat',         name:'Rat Ponds',                coords:[64.8850,-147.7600], type:'Feature',
+    short:'6.8-mile ski tour — thermokarst, drunken forests',
+    full:'Flat route through drunken forests and ice formations from sub-arctic thermokarst dynamics.',
+    mile:'6.8 miles' },
+  { id:'omdr',        name:'Old Murphy Dome Rd TH',    coords:[64.9050,-148.0800], type:'Feature',
+    short:'OMDR mushing / ski corridor — ~5 mi one-way',
+    full:'Groomed by "Bad Bob" Baker. Multi-use motorized. ~5 miles one-way to McCall Street.',
+    mile:null },
+  { id:'birch-hill',  name:'Birch Hill',               coords:[64.8950,-147.6900], type:'Feature',
+    short:'Nordic ski in winter, hiking / running in summer',
+    full:'~10 miles of groomed trails. Blackhawk Loop (6.2 km). Maintained by the Nordic Ski Club of Fairbanks.',
+    mile:null },
+  { id:'steffensen',  name:'Steffensen-Dix Property',  coords:[64.8700,-147.8500], type:'Conservation',
+    short:'115 acres — keystone east-west corridor parcel',
+    full:'Links eastern and western halves of the Goldstream Public Use Area, preserving the transit corridor.',
+    mile:null },
+];
+
+const TYPE_LABEL = { Hub:'Hub', Milestone:'Milestone', Feature:'Feature', Conservation:'Conservation' };
+const LABEL_CLASS = { Hub:'hub', Milestone:'mile', Feature:'feat', Conservation:'cons' };
+
+// Make custom icon: small gold dot
+function mkDot(type) {
+  const colors = { Hub:'#5a9abf', Milestone:'#ead8ac', Feature:'#7abf5a', Conservation:'#a0bf7a' };
+  const c = colors[type] || '#ead8ac';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10">
+    <circle cx="5" cy="5" r="4" fill="${c}" fill-opacity=".9" stroke="rgba(35,31,32,.6)" stroke-width="1"/>
+  </svg>`;
+  return L.divIcon({ html:svg, className:'', iconSize:[10,10], iconAnchor:[5,5], popupAnchor:[0,-8] });
+}
+
+const infoPanel = document.getElementById('info');
+document.getElementById('info-close').addEventListener('click', () => infoPanel.classList.remove('vis'));
+
+POIS.forEach(poi => {
+  // Dot marker
+  const m = L.marker(poi.coords, { icon: mkDot(poi.type), zIndexOffset:500 }).addTo(map);
+
+  // Permanent label as tooltip
+  m.bindTooltip(poi.name, {
+    permanent: true,
+    direction: 'right',
+    offset: [8, 0],
+    className: `poi-label ${LABEL_CLASS[poi.type]}`
+  }).openTooltip();
+
+  // Click opens info panel
+  m.on('click', () => {
+    document.getElementById('info-type').textContent  = TYPE_LABEL[poi.type];
+    document.getElementById('info-name').textContent  = poi.name;
+    document.getElementById('info-short').textContent = poi.short;
+    document.getElementById('info-full').textContent  = poi.full;
+    const mw = document.getElementById('info-mile-wrap');
+    mw.innerHTML = poi.mile ? `<div id="info-mile">${poi.mile}</div>` : '';
+    infoPanel.classList.add('vis');
+  });
+});
+
+// ── FETCH ─────────────────────────────────────────────────────────────
+// Runs in the user's browser — Overpass API is fully accessible there.
+async function fetchTrails() {
+  setLoad(10, 'Connecting to OpenStreetMap…');
+  try {
+    setLoad(25, 'Fetching trail data for Fairbanks area…');
+    const res = await fetch(OVERPASS, {
+      method: 'POST',
+      body: 'data=' + encodeURIComponent(QUERY),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    });
+    setLoad(65, 'Parsing trail geometry…');
+    const json = await res.json();
+    setLoad(85, 'Rendering trails…');
+    render(json.elements || []);
+  } catch(err) {
+    console.error(err);
+    setLoad(100, 'Could not reach Overpass API — reload to retry');
+    setTimeout(() => document.getElementById('load-strip').classList.add('done'), 3000);
+  }
+}
+
+// ── TOOLTIPS — body-level, never clipped ─────────────────────────────
+const tip = document.createElement('div');
+tip.id = 'fp-tip';
+document.body.appendChild(tip);
+
+document.querySelectorAll('.fp').forEach(btn => {
+  btn.addEventListener('mouseenter', e => {
+    const label = btn.dataset.tip;
+    if (!label) return;
+    tip.textContent = label;
+    const r = btn.getBoundingClientRect();
+    tip.style.opacity = '0';
+    tip.style.display = 'block';
+    const tw = tip.offsetWidth;
+    tip.style.left = Math.round(r.left + r.width/2 - tw/2) + 'px';
+    tip.style.top  = Math.round(r.bottom + 8) + 'px';
+    tip.style.opacity = '1';
+  });
+  btn.addEventListener('mouseleave', () => { tip.style.opacity = '0'; });
+});
+
+fetchTrails();
+</script>
+</body>
+</html>
